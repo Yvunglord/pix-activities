@@ -1,0 +1,143 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Script xmlns:i="http://www.w3.org/2001/XMLSchema-instance" z:Id="i1" xmlns:z="http://schemas.microsoft.com/2003/10/Serialization/" xmlns="http://schemas.datacontract.org/2004/07/BR.Logic">
+  <CompilationType>CSharp</CompilationType>
+  <Description i:nil="true" />
+  <Id>8a892fba-2883-43e9-9273-81a4a2d30f08</Id>
+  <Logic z:Id="i2" i:type="ExecutedStep">
+    <Childs>
+      <AbstractStep z:Id="i3" i:type="ExecutedStep">
+        <Childs />
+        <Id>1ff188a0-008c-4007-b150-52468865f851</Id>
+        <Parent z:Ref="i2" />
+        <PropertyValues>
+          <PropertyValue z:Id="i4">
+            <PropertyName>CSCode</PropertyName>
+            <_dataType>Value</_dataType>
+            <_expression i:nil="true" />
+            <_screenShotBase64 i:nil="true" />
+            <_value xmlns:d7p1="http://www.w3.org/2001/XMLSchema" i:type="d7p1:string">employeesTable = new DataTable("Employees");
+        
+// Добавляем колонки
+DataColumn empIdColumn = new DataColumn("EmployeeId", typeof(int));
+DataColumn empNameColumn = new DataColumn("EmployeeName", typeof(string));
+DataColumn empDepartmentColumn = new DataColumn("Department", typeof(string));
+
+employeesTable.Columns.Add(empIdColumn);
+employeesTable.Columns.Add(empNameColumn);
+employeesTable.Columns.Add(empDepartmentColumn);
+
+// Устанавливаем первичный ключ
+employeesTable.PrimaryKey = new DataColumn[] { empIdColumn };
+
+// Заполняем данными
+employeesTable.Rows.Add(1, "Иван Петров", "IT");
+employeesTable.Rows.Add(2, "Мария Иванова", "HR");
+employeesTable.Rows.Add(3, "Алексей Сидоров", "Finance");
+employeesTable.Rows.Add(4, "Елена Смирнова", "IT");
+employeesTable.Rows.Add(5, "Дмитрий Козлов", "Marketing");
+
+salariesTable = new DataTable("Salaries");
+
+DataColumn salEmpIdColumn = new DataColumn("EmployeeId", typeof(int));
+DataColumn salaryColumn = new DataColumn("Salary", typeof(decimal));
+DataColumn bonusColumn = new DataColumn("Bonus", typeof(decimal));
+DataColumn dateColumn = new DataColumn("SalaryDate", typeof(DateTime));
+
+salariesTable.Columns.Add(salEmpIdColumn);
+salariesTable.Columns.Add(salaryColumn);
+salariesTable.Columns.Add(bonusColumn);
+salariesTable.Columns.Add(dateColumn);
+
+// Заполняем данными
+salariesTable.Rows.Add(1, 75000.00m, 5000.00m, new DateTime(2024, 1, 15));
+salariesTable.Rows.Add(2, 65000.00m, 3000.00m, new DateTime(2024, 1, 15));
+salariesTable.Rows.Add(3, 80000.00m, 7000.00m, new DateTime(2024, 1, 15));
+salariesTable.Rows.Add(1, 76000.00m, 5500.00m, new DateTime(2024, 2, 15));
+salariesTable.Rows.Add(4, 72000.00m, 4500.00m, new DateTime(2024, 1, 15));</_value>
+            <_xpathSettings xmlns:d7p1="http://schemas.datacontract.org/2004/07/BR.XPath" i:nil="true" />
+          </PropertyValue>
+        </PropertyValues>
+        <SelectedOptionId i:nil="true" />
+        <AutoCloseMode>None</AutoCloseMode>
+        <EnableStatus>true</EnableStatus>
+        <ExceptionHandlingMode>Default</ExceptionHandlingMode>
+        <RetryCount>-1</RetryCount>
+        <Text></Text>
+        <_activityFullName>BR.Core.Base.ExecuteCSCode</_activityFullName>
+      </AbstractStep>
+      <AbstractStep z:Id="i5" i:type="ExecutedStep">
+        <Childs />
+        <Id>ab42727c-3881-41d3-b043-214a06c861f9</Id>
+        <Parent z:Ref="i2" />
+        <PropertyValues>
+          <PropertyValue z:Id="i6">
+            <PropertyName>FirstTable</PropertyName>
+            <_dataType>Expression</_dataType>
+            <_expression>salariesTable</_expression>
+            <_screenShotBase64 i:nil="true" />
+            <_value i:nil="true" />
+            <_xpathSettings xmlns:d7p1="http://schemas.datacontract.org/2004/07/BR.XPath" i:nil="true" />
+          </PropertyValue>
+          <PropertyValue z:Id="i7">
+            <PropertyName>SecondTable</PropertyName>
+            <_dataType>Expression</_dataType>
+            <_expression>employeesTable</_expression>
+            <_screenShotBase64 i:nil="true" />
+            <_value i:nil="true" />
+            <_xpathSettings xmlns:d7p1="http://schemas.datacontract.org/2004/07/BR.XPath" i:nil="true" />
+          </PropertyValue>
+          <PropertyValue z:Id="i8">
+            <PropertyName>JoinKeys</PropertyName>
+            <_dataType>Expression</_dataType>
+            <_expression>new List&lt;string&gt;() {""}</_expression>
+            <_screenShotBase64 i:nil="true" />
+            <_value i:nil="true" />
+            <_xpathSettings xmlns:d7p1="http://schemas.datacontract.org/2004/07/BR.XPath" i:nil="true" />
+          </PropertyValue>
+        </PropertyValues>
+        <SelectedOptionId i:nil="true" />
+        <AutoCloseMode>None</AutoCloseMode>
+        <EnableStatus>true</EnableStatus>
+        <ExceptionHandlingMode>Default</ExceptionHandlingMode>
+        <RetryCount>-1</RetryCount>
+        <Text></Text>
+        <_activityFullName>Activities.Custom.JoinDataTables</_activityFullName>
+      </AbstractStep>
+    </Childs>
+    <Id>29fd481c-50bb-484a-acc1-6bdd5e9124a7</Id>
+    <Parent i:nil="true" />
+    <PropertyValues />
+    <SelectedOptionId i:nil="true" />
+    <AutoCloseMode>None</AutoCloseMode>
+    <EnableStatus>true</EnableStatus>
+    <ExceptionHandlingMode>Default</ExceptionHandlingMode>
+    <RetryCount>-1</RetryCount>
+    <Text></Text>
+    <_activityFullName>BR.Core.Base.Container</_activityFullName>
+  </Logic>
+  <Name>main.pix</Name>
+  <Namespaces xmlns:d2p1="http://schemas.microsoft.com/2003/10/Serialization/Arrays" />
+  <Params />
+  <PlatformVersion xmlns:d2p1="http://schemas.datacontract.org/2004/07/System">
+    <d2p1:_Build>6</d2p1:_Build>
+    <d2p1:_Major>2</d2p1:_Major>
+    <d2p1:_Minor>27</d2p1:_Minor>
+    <d2p1:_Revision>0</d2p1:_Revision>
+  </PlatformVersion>
+  <TemplateVersion xmlns:d2p1="http://schemas.datacontract.org/2004/07/System" i:nil="true" />
+  <Variables xmlns:d2p1="http://schemas.datacontract.org/2004/07/BR.Logic.Params">
+    <d2p1:Variable z:Id="i9">
+      <d2p1:DefaultValueExpression></d2p1:DefaultValueExpression>
+      <d2p1:Description></d2p1:Description>
+      <d2p1:Name>employeesTable</d2p1:Name>
+      <d2p1:TypeString>System.Data.DataTable</d2p1:TypeString>
+    </d2p1:Variable>
+    <d2p1:Variable z:Id="i10">
+      <d2p1:DefaultValueExpression></d2p1:DefaultValueExpression>
+      <d2p1:Description></d2p1:Description>
+      <d2p1:Name>salariesTable </d2p1:Name>
+      <d2p1:TypeString>System.Data.DataTable</d2p1:TypeString>
+    </d2p1:Variable>
+  </Variables>
+  <Version i:nil="true" />
+</Script>

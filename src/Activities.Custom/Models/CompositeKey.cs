@@ -1,5 +1,3 @@
-namespace Activities.Custom;
-
 public sealed class CompositeKey : IEquatable<CompositeKey>
 {
     private readonly object[] _values;
@@ -39,8 +37,7 @@ public sealed class CompositeKey : IEquatable<CompositeKey>
 
             foreach (var value in _values)
             {
-                hash = hash * 23 +
-                        (value?.GetHashCode() ?? 0);
+                hash = hash * 23 + (value?.GetHashCode() ?? 0);
             }
 
             return hash;

@@ -1,45 +1,41 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Data;
+using System.Linq;
 using Xunit;
 using Activities.Custom;
 
 namespace Activities.Custom.Tests;
 
-public class JoinDataTablesTests
+public class JoinDataTablesEvilTests
 {
-    // Вспомогательный метод для создания тестовых таблиц
-    private (DataTable Left, DataTable Right) CreateTestData()
-    {
-        var left = new DataTable("LeftTable");
-        left.Columns.Add("ID", typeof(int));
-        left.Columns.Add("Value", typeof(string));
-        left.Rows.Add(1, "Left_1");
-        left.Rows.Add(2, "Left_2");
-        left.Rows.Add(DBNull.Value, "Left_Null"); // Строка с NULL-ключом
-
-        var right = new DataTable("RightTable");
-        right.Columns.Add("ID", typeof(int));
-        right.Columns.Add("Value", typeof(string)); // Имя совпадает, проверим переименование
-        right.Columns.Add("Extra", typeof(string));
-        right.Rows.Add(1, "Right_1", "Ext_1");
-        right.Rows.Add(3, "Right_3", "Ext_3");
-        right.Rows.Add(DBNull.Value, "Right_Null", "Ext_Null"); // Строка с NULL-ключом
-
-        return (left, right);
-    }
-
+    /// <summary>
+    /// Тест проверяет декартово произведение (многие-ко-многим) для дублирующихся ключей,
+    /// а также корректность сопоставления по РАЗНЫМ именам ключей.
+    /// </summary>
     [Fact]
-    public void Execute_InnerJoin_ReturnsOnlyMatchedRows()
+    public void Execute_ManyToManyWithDifferentKeyNames_EvaluatesCorrectCartesianProduct()
     {
         // Arrange
-        var (left, right) = CreateTestData();
+        var left = new DataTable();
+        left.Columns.Add("LeftKey", typeof(int));
+        left.Columns.Add("Payload", typeof(string));
+        left.Rows.Add(10, "L_A");
+        left.Rows.Add(10, "L_B"); // Дубликат ключа 10
+
+        var right = new DataTable();
+        right.Columns.Add("RightKey", typeof(int));
+        right.Columns.Add("Payload", typeof(string)); // Коллизия имени не-ключевой колонки
+        right.Rows.Add(10, "R_X");
+        right.Rows.Add(10, "R_Y"); // Дубликат ключа 10
+
         var activity = new JoinDataTables
         {
             FirstTable = left,
             SecondTable = right,
             ConnectionType = JoinType.Inner,
-            JoinKeys = new List<string> { "ID" },
+            LeftJoinKeys = new List<string> { "LeftKey" },
+            RightJoinKeys = new List<string> { "RightKey" },
             SaveDestination = SaveResultTo.NewTable
         };
 
@@ -48,27 +44,44 @@ public class JoinDataTablesTests
         var result = activity.ResultTable;
 
         // Assert
-        // Должно быть 2 строки: ID=1 и ID=DBNull (так как NULL == NULL в нашей логике CompositeKey)
-        Assert.Equal(2, result.Rows.Count);
+        // Должно быть 2 * 2 = 4 строки для ключа 10
+        Assert.Equal(4, result.Rows.Count);
+
+        // Проверяем, что правый ключ вообще исчез из структуры, уступив место левому
+        Assert.Contains("LeftKey", result.Columns.Cast<DataColumn>().Select(c => c.ColumnName));
+        Assert.DoesNotContain("RightKey", result.Columns.Cast<DataColumn>().Select(c => c.ColumnName));
         
-        // Проверяем строку с ID=1
-        var row1 = result.AsEnumerable().First(r => r.Field<int?>("ID") == 1);
-        Assert.Equal("Left_1", row1["Value"]);
-        Assert.Equal("Right_1", row1["Value_Right"]); // Проверка суффикса
+        // Проверяем переименование не-ключевой колонки с коллизией имён
+        Assert.Contains("Payload_Right", result.Columns.Cast<DataColumn>().Select(c => c.ColumnName));
     }
 
+    /// <summary>
+    /// Коварный тест на коллизию суффиксов.
+    /// Что если в правой таблице УЖЕ есть колонка с именем "Name_Right"?
+    /// Алгоритм не должен затереть данные или упасть с ошибкой "Column already belongs to this DataTable".
+    /// </summary>
     [Fact]
-    public void Execute_LeftJoin_ReturnsAllLeftRows()
+    public void Execute_SuffixCollision_HandlesExistingSuffixGracefully()
     {
         // Arrange
-        var (left, right) = CreateTestData();
+        var left = new DataTable();
+        left.Columns.Add("ID", typeof(int));
+        left.Columns.Add("Info", typeof(string));
+        left.Rows.Add(1, "LeftInfo");
+
+        var right = new DataTable();
+        right.Columns.Add("TargetID", typeof(int));
+        right.Columns.Add("Info", typeof(string));       // Вызовет генерацию Info_Right
+        right.Columns.Add("Info_Right", typeof(string)); // УЖЕ СУЩЕСТВУЕТ! Коварный случай.
+        right.Rows.Add(1, "RightInfo", "PreExistingRight");
+
         var activity = new JoinDataTables
         {
             FirstTable = left,
             SecondTable = right,
-            ConnectionType = JoinType.Left,
-            JoinKeys = new List<string> { "ID" },
-            SaveDestination = SaveResultTo.NewTable
+            ConnectionType = JoinType.Inner,
+            LeftJoinKeys = new List<string> { "ID" },
+            RightJoinKeys = new List<string> { "TargetID" }
         };
 
         // Act
@@ -76,28 +89,70 @@ public class JoinDataTablesTests
         var result = activity.ResultTable;
 
         // Assert
-        // Должны вернуться все 3 строки из левой таблицы
-        Assert.Equal(3, result.Rows.Count);
-
-        // Строка ID=2 не имеет пары справа, проверяем что там DBNull
-        var row2 = result.AsEnumerable().First(r => r.Field<int?>("ID") == 2);
-        Assert.Equal("Left_2", row2["Value"]);
-        Assert.Equal(DBNull.Value, row2["Value_Right"]);
-        Assert.Equal(DBNull.Value, row2["Extra"]);
+        // Ожидаем, что код защищён от дублирования имён (например, не добавит Info_Right дважды)
+        var columnNames = result.Columns.Cast<DataColumn>().Select(c => c.ColumnName).ToList();
+        
+        Assert.Contains("Info", columnNames);
+        Assert.Contains("Info_Right", columnNames); 
+        
+        var row = result.Rows[0];
+        Assert.Equal("LeftInfo", row["Info"]);
     }
 
+    /// <summary>
+    /// Тест на асимметрию конфигурации: передали 2 ключа для левой таблицы и 1 для правой.
+    /// Обязано упасть на взлете (до обработки данных).
+    /// </summary>
     [Fact]
-    public void Execute_RightJoin_ReturnsAllRightRows()
+    public void Execute_MismatchedKeyCount_ThrowsArgumentException()
     {
         // Arrange
-        var (left, right) = CreateTestData();
+        var left = new DataTable();
+        left.Columns.Add("K1", typeof(int));
+        left.Columns.Add("K2", typeof(string));
+
+        var right = new DataTable();
+        right.Columns.Add("K1", typeof(int));
+
+        var activity = new JoinDataTables
+        {
+            FirstTable = left,
+            SecondTable = right,
+            ConnectionType = JoinType.Inner,
+            LeftJoinKeys = new List<string> { "K1", "K2" },
+            RightJoinKeys = new List<string> { "K1" } // Меньше, чем слева
+        };
+
+        // Act & Assert
+        var ex = Assert.Throws<ArgumentException>(() => activity.Execute(null));
+        Assert.Contains("Количество ключей", ex.Message);
+    }
+
+    /// <summary>
+    /// Самый злой тест для Right/Full Join без совпадений. 
+    /// Проверяет, переносятся ли значения ключевых полей из Правой таблицы в Левые ключи результирующей структуры,
+    /// когда левой строки физически нет (leftRow == null).
+    /// </summary>
+    [Fact]
+    public void Execute_RightJoinWithNoMatch_PopulatesKeyColumnsFromRightTable()
+    {
+        // Arrange
+        var left = new DataTable();
+        left.Columns.Add("L_ID", typeof(int));
+        left.Columns.Add("L_Data", typeof(string));
+
+        var right = new DataTable();
+        right.Columns.Add("R_ID", typeof(int));
+        right.Columns.Add("R_Data", typeof(string));
+        right.Rows.Add(999, "OrphanRight"); // Нет пары в левой таблице
+
         var activity = new JoinDataTables
         {
             FirstTable = left,
             SecondTable = right,
             ConnectionType = JoinType.Right,
-            JoinKeys = new List<string> { "ID" },
-            SaveDestination = SaveResultTo.NewTable
+            LeftJoinKeys = new List<string> { "L_ID" },
+            RightJoinKeys = new List<string> { "R_ID" }
         };
 
         // Act
@@ -105,58 +160,41 @@ public class JoinDataTablesTests
         var result = activity.ResultTable;
 
         // Assert
-        // Должны вернуться все 3 строки из правой таблицы
-        Assert.Equal(3, result.Rows.Count);
-
-        // Строка ID=3 не имеет пары слева
-        var row3 = result.AsEnumerable().First(r => r.Field<int?>("ID") == 3);
-        Assert.Equal(DBNull.Value, row3["Value"]); // Из левой таблицы — пусто
-        Assert.Equal("Right_3", row3["Value_Right"]);
+        Assert.Single(result.Rows);
+        
+        // Ключевая колонка в результате называется "L_ID" (так как правый ключ R_ID мы дропнули).
+        // Но значение туда должно прийти из правой таблицы (999), а не остаться DBNull!
+        Assert.Equal(999, result.Rows[0]["L_ID"]);
+        Assert.Equal(DBNull.Value, result.Rows[0]["L_Data"]);
+        Assert.Equal("OrphanRight", result.Rows[0]["R_Data"]);
     }
 
+    /// <summary>
+    /// Валидация типов должна падать, даже если в таблицах физически нет данных (0 строк), 
+    /// но структуры колонок несовместимы.
+    /// </summary>
     [Fact]
-    public void Execute_FullJoin_ReturnsAllRows()
-    {
-        // Arrange
-        var (left, right) = CreateTestData();
-        var activity = new JoinDataTables
-        {
-            FirstTable = left,
-            SecondTable = right,
-            ConnectionType = JoinType.Full,
-            JoinKeys = new List<string> { "ID" },
-            SaveDestination = SaveResultTo.NewTable
-        };
-
-        // Act
-        activity.Execute(null);
-        var result = activity.ResultTable;
-
-        // Assert
-        // 1 (ID=1) + 1 (ID=2) + 1 (ID=3) + 1 (ID=Null) = 4 строки
-        Assert.Equal(4, result.Rows.Count);
-    }
-
-    [Fact]
-    public void Execute_IncompatibleTypes_ThrowsArgumentException()
+    public void Execute_EmptyTablesIncompatibleTypes_ThrowsArgumentException()
     {
         // Arrange
         var left = new DataTable();
-        left.Columns.Add("ID", typeof(int)); // Ключ — int
+        left.Columns.Add("ID", typeof(Guid)); // Ключ Guid
 
         var right = new DataTable();
-        right.Columns.Add("ID", typeof(string)); // Ключ — string
+        right.Columns.Add("ID", typeof(int)); // Ключ int
+        // Данных нет в обеих таблицах
 
         var activity = new JoinDataTables
         {
             FirstTable = left,
             SecondTable = right,
             ConnectionType = JoinType.Inner,
-            JoinKeys = new List<string> { "ID" }
+            LeftJoinKeys = new List<string> { "ID" },
+            RightJoinKeys = new List<string> { "ID" }
         };
 
         // Act & Assert
-        // Проверяем, что валидация типов в ValidateKeys работает и выкидывает ошибку
-        Assert.Throws<ArgumentException>(() => activity.Execute(null));
+        var ex = Assert.Throws<ArgumentException>(() => activity.Execute(null));
+        Assert.Contains("Тип поля ключа отличается", ex.Message);
     }
 }
