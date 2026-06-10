@@ -44,9 +44,14 @@ public class JoinDataTables : Activity
     public JoinType ConnectionType { get; set; } = JoinType.Inner;
 
     [Category("Настройки")]
-    [DisplayName("Ключи соединения")]
+    [DisplayName("Ключи левой таблицы")]
     [IsRequired]
-    public List<string> JoinKeys { get; set; } = new();
+    public List<string> LeftJoinKeys { get; set; } = new();
+
+    [Category("Настройки")]
+    [DisplayName("Ключи правой таблицы")]
+    [IsRequired]
+    public List<string> RightJoinKeys { get; set; } = new();
 
     [Category("Настройки вывода")]
     [DisplayName("Куда сохранить результат")]
@@ -63,16 +68,21 @@ public class JoinDataTables : Activity
         ArgumentNullException.ThrowIfNull(FirstTable);
         ArgumentNullException.ThrowIfNull(SecondTable);
 
-        if (JoinKeys == null || JoinKeys.Count == 0)
+        if (LeftJoinKeys == null || LeftJoinKeys.Count == 0 || RightJoinKeys == null || RightJoinKeys.Count == 0)
         {
-            throw new ArgumentException(
-                "Необходимо указать хотя бы один ключ для объединения.");
+            throw new ArgumentException("Необходимо указать ключи для обеих таблиц.");
+        }
+
+        if (LeftJoinKeys.Count != RightJoinKeys.Count)
+        {
+            throw new ArgumentException("Количество ключей в левой и правой таблицах должно совпадать.");
         }
 
         var joinedResult = MergeTables(
             FirstTable,
             SecondTable,
-            JoinKeys,
+            LeftJoinKeys,
+            RightJoinKeys,
             ConnectionType);
 
         switch (SaveDestination)
@@ -91,19 +101,20 @@ public class JoinDataTables : Activity
         }
     }
 
-    private static void ReplaceTableContent(
-        DataTable target,
-        DataTable source)
+    private static void ReplaceTableContent(DataTable target, DataTable source)
     {
-        target.Reset();
+        // Полностью очищаем данные, старые связи и ограничения
+        target.Constraints.Clear();
+        target.Rows.Clear();
+        target.Columns.Clear(); // <-- Гарантированно удаляет ВСЕ колонки
 
+        // Строим новую схему на основе результатов объединения
         foreach (DataColumn column in source.Columns)
         {
-            target.Columns.Add(
-                column.ColumnName,
-                column.DataType);
+            target.Columns.Add(column.ColumnName, column.DataType);
         }
 
+        // Импортируем строки
         foreach (DataRow row in source.Rows)
         {
             target.ImportRow(row);
@@ -113,64 +124,76 @@ public class JoinDataTables : Activity
     private DataTable MergeTables(
         DataTable left,
         DataTable right,
-        IReadOnlyCollection<string> keys,
+        List<string> leftKeys,
+        List<string> rightKeys,
         JoinType joinType)
     {
-        ValidateKeys(left, right, keys);
+        ValidateKeys(left, right, leftKeys, rightKeys);
 
-        var result = CreateResultStructure(left, right, keys);
+        var result = CreateResultStructure(left, right, leftKeys, rightKeys);
 
-        CompositeKey BuildKey(DataRow row)
+        // Функция сборки композитного ключа для Левой таблицы
+        CompositeKey BuildLeftKey(DataRow row)
         {
-            return new CompositeKey(
-                keys.Select(k =>
-                    row.IsNull(k)
-                        ? DBNull.Value
-                        : row[k]));
+            return new CompositeKey(leftKeys.Select(k => row.IsNull(k) ? DBNull.Value : row[k]));
+        }
+
+        // Функция сборки композитного ключа для Правой таблицы
+        CompositeKey BuildRightKey(DataRow row)
+        {
+            return new CompositeKey(rightKeys.Select(k => row.IsNull(k) ? DBNull.Value : row[k]));
         }
 
         var leftLookup = left.AsEnumerable()
-            .GroupBy(BuildKey)
-            .ToDictionary(
-                g => g.Key,
-                g => g.ToList());
+            .GroupBy(BuildLeftKey)
+            .ToDictionary(g => g.Key, g => g.ToList());
 
         var rightLookup = right.AsEnumerable()
-            .GroupBy(BuildKey)
-            .ToDictionary(
-                g => g.Key,
-                g => g.ToList());
+            .GroupBy(BuildRightKey)
+            .ToDictionary(g => g.Key, g => g.ToList());
 
         var allKeys = leftLookup.Keys
             .Union(rightLookup.Keys)
             .ToList();
 
-        void AddCombinedRow(
-            DataRow? leftRow,
-            DataRow? rightRow)
+        void AddCombinedRow(DataRow? leftRow, DataRow? rightRow)
         {
             var newRow = result.NewRow();
 
+            // Заполняем данные из левой таблицы
             if (leftRow != null)
             {
                 foreach (DataColumn column in left.Columns)
                 {
-                    newRow[column.ColumnName] =
-                        leftRow[column];
+                    newRow[column.ColumnName] = leftRow[column];
                 }
             }
 
+            // Заполняем данные из правой таблицы
             if (rightRow != null)
             {
+                // Если левой строки нет (например, при Right/Full Join), 
+                // нам нужно перенести значения ключей из правой таблицы в соответствующие колонки результирующей таблицы
+                if (leftRow == null)
+                {
+                    for (int i = 0; i < rightKeys.Count; i++)
+                    {
+                        string targetLeftKeyName = leftKeys[i];
+                        newRow[targetLeftKeyName] = rightRow[rightKeys[i]];
+                    }
+                }
+
                 foreach (DataColumn column in right.Columns)
                 {
-                    string targetColumn;
-
-                    if (keys.Contains(column.ColumnName))
+                    // Ключевую колонку правой таблицы пропускаем, так как её роль уже выполняет левая ключевая колонка
+                    if (rightKeys.Contains(column.ColumnName))
                     {
-                        targetColumn = column.ColumnName;
+                        continue;
                     }
-                    else if (left.Columns.Contains(column.ColumnName))
+
+                    string targetColumn;
+                    // Если имя колонки совпадает с колонкой из левой таблицы, добавляем суффикс
+                    if (left.Columns.Contains(column.ColumnName))
                     {
                         targetColumn = column.ColumnName + "_Right";
                     }
@@ -179,8 +202,7 @@ public class JoinDataTables : Activity
                         targetColumn = column.ColumnName;
                     }
 
-                    newRow[targetColumn] =
-                        rightRow[column];
+                    newRow[targetColumn] = rightRow[column];
                 }
             }
 
@@ -190,12 +212,9 @@ public class JoinDataTables : Activity
         switch (joinType)
         {
             case JoinType.Inner:
-            {
                 foreach (var key in leftLookup.Keys)
                 {
-                    if (!rightLookup.TryGetValue(
-                            key,
-                            out var rightRows))
+                    if (!rightLookup.TryGetValue(key, out var rightRows))
                     {
                         continue;
                     }
@@ -204,31 +223,22 @@ public class JoinDataTables : Activity
                     {
                         foreach (var rightRow in rightRows)
                         {
-                            AddCombinedRow(
-                                leftRow,
-                                rightRow);
+                            AddCombinedRow(leftRow, rightRow);
                         }
                     }
                 }
-
                 break;
-            }
 
             case JoinType.Left:
-            {
                 foreach (var pair in leftLookup)
                 {
-                    if (rightLookup.TryGetValue(
-                            pair.Key,
-                            out var rightRows))
+                    if (rightLookup.TryGetValue(pair.Key, out var rightRows))
                     {
                         foreach (var leftRow in pair.Value)
                         {
                             foreach (var rightRow in rightRows)
                             {
-                                AddCombinedRow(
-                                    leftRow,
-                                    rightRow);
+                                AddCombinedRow(leftRow, rightRow);
                             }
                         }
                     }
@@ -236,31 +246,22 @@ public class JoinDataTables : Activity
                     {
                         foreach (var leftRow in pair.Value)
                         {
-                            AddCombinedRow(
-                                leftRow,
-                                null);
+                            AddCombinedRow(leftRow, null);
                         }
                     }
                 }
-
                 break;
-            }
 
             case JoinType.Right:
-            {
                 foreach (var pair in rightLookup)
                 {
-                    if (leftLookup.TryGetValue(
-                            pair.Key,
-                            out var leftRows))
+                    if (leftLookup.TryGetValue(pair.Key, out var leftRows))
                     {
                         foreach (var rightRow in pair.Value)
                         {
                             foreach (var leftRow in leftRows)
                             {
-                                AddCombinedRow(
-                                    leftRow,
-                                    rightRow);
+                                AddCombinedRow(leftRow, rightRow);
                             }
                         }
                     }
@@ -268,29 +269,17 @@ public class JoinDataTables : Activity
                     {
                         foreach (var rightRow in pair.Value)
                         {
-                            AddCombinedRow(
-                                null,
-                                rightRow);
+                            AddCombinedRow(null, rightRow);
                         }
                     }
                 }
-
                 break;
-            }
 
             case JoinType.Full:
-            {
                 foreach (var key in allKeys)
                 {
-                    bool hasLeft =
-                        leftLookup.TryGetValue(
-                            key,
-                            out var leftRows);
-
-                    bool hasRight =
-                        rightLookup.TryGetValue(
-                            key,
-                            out var rightRows);
+                    bool hasLeft = leftLookup.TryGetValue(key, out var leftRows);
+                    bool hasRight = rightLookup.TryGetValue(key, out var rightRows);
 
                     if (hasLeft && hasRight)
                     {
@@ -298,9 +287,7 @@ public class JoinDataTables : Activity
                         {
                             foreach (var rightRow in rightRows!)
                             {
-                                AddCombinedRow(
-                                    leftRow,
-                                    rightRow);
+                                AddCombinedRow(leftRow, rightRow);
                             }
                         }
                     }
@@ -308,28 +295,21 @@ public class JoinDataTables : Activity
                     {
                         foreach (var leftRow in leftRows!)
                         {
-                            AddCombinedRow(
-                                leftRow,
-                                null);
+                            AddCombinedRow(leftRow, null);
                         }
                     }
                     else
                     {
                         foreach (var rightRow in rightRows!)
                         {
-                            AddCombinedRow(
-                                null,
-                                rightRow);
+                            AddCombinedRow(null, rightRow);
                         }
                     }
                 }
-
                 break;
-            }
 
             default:
-                throw new ArgumentOutOfRangeException(
-                    nameof(joinType));
+                throw new ArgumentOutOfRangeException(nameof(joinType));
         }
 
         return result;
@@ -338,29 +318,30 @@ public class JoinDataTables : Activity
     private static void ValidateKeys(
         DataTable left,
         DataTable right,
-        IEnumerable<string> keys)
+        List<string> leftKeys,
+        List<string> rightKeys)
     {
-        foreach (var key in keys)
+        for (int i = 0; i < leftKeys.Count; i++)
         {
-            if (!left.Columns.Contains(key))
+            string leftKey = leftKeys[i];
+            string rightKey = rightKeys[i];
+
+            if (!left.Columns.Contains(leftKey))
             {
-                throw new ArgumentException(
-                    $"Левая таблица не содержит ключ '{key}'.");
+                throw new ArgumentException($"Левая таблица не содержит ключ '{leftKey}'.");
             }
 
-            if (!right.Columns.Contains(key))
+            if (!right.Columns.Contains(rightKey))
             {
-                throw new ArgumentException(
-                    $"Правая таблица не содержит ключ '{key}'.");
+                throw new ArgumentException($"Правая таблица не содержит ключ '{rightKey}'.");
             }
 
-            if (left.Columns[key]!.DataType !=
-                right.Columns[key]!.DataType)
+            if (left.Columns[leftKey]!.DataType != right.Columns[rightKey]!.DataType)
             {
                 throw new ArgumentException(
-                    $"Тип поля '{key}' отличается: " +
-                    $"{left.Columns[key]!.DataType.Name} <> " +
-                    $"{right.Columns[key]!.DataType.Name}");
+                    $"Тип поля ключа отличается: " +
+                    $"Левый '{leftKey}' ({left.Columns[leftKey]!.DataType.Name}) <> " +
+                    $"Правый '{rightKey}' ({right.Columns[rightKey]!.DataType.Name})");
             }
         }
     }
@@ -368,32 +349,38 @@ public class JoinDataTables : Activity
     private static DataTable CreateResultStructure(
         DataTable left,
         DataTable right,
-        IReadOnlyCollection<string> keys)
+        List<string> leftKeys,
+        List<string> rightKeys)
     {
         var result = new DataTable();
 
+        // Добавляем все колонки из левой таблицы
         foreach (DataColumn column in left.Columns)
         {
-            result.Columns.Add(
-                column.ColumnName,
-                column.DataType);
+            result.Columns.Add(column.ColumnName, column.DataType);
         }
 
+        // Добавляем колонки из правой таблицы
         foreach (DataColumn column in right.Columns)
         {
             string name = column.ColumnName;
 
-            if (result.Columns.Contains(name) &&
-                !keys.Contains(name))
+            // Если колонка является правым ключом соединения, пропускаем её 
+            // (в результирующей таблице за неё отвечает колонка левого ключа)
+            if (rightKeys.Contains(name))
+            {
+                continue;
+            }
+
+            // Коллизия имён: если колонка с таким же именем уже есть из левой таблицы, добавляем суффикс
+            if (result.Columns.Contains(name))
             {
                 name += "_Right";
             }
 
             if (!result.Columns.Contains(name))
             {
-                result.Columns.Add(
-                    name,
-                    column.DataType);
+                result.Columns.Add(name, column.DataType);
             }
         }
 
