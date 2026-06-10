@@ -1,7 +1,12 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net9.0</TargetFramework>
+    <TargetFramework>net9.0</TargetFramework> <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
+    <PackageId>PIX.Activities.Custom.Tables</PackageId>
+    <Version>1.0.0</Version>
+    <Authors>Egor Kuznetsov</Authors>
+    <Company>Egor Kuznetsov</Company>
+    <Description>Кастомные активности для работы с DataTable в PIX Studio</Description>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
   </PropertyGroup>
