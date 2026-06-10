@@ -21,7 +21,7 @@ jobs:
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: '9.0.x'
+          dotnet-version: '7.0.x'
 
       - name: Restore dependencies
         run: dotnet restore src/Activities.Custom.sln
@@ -39,5 +39,5 @@ jobs:
           path: '**/bin/Release/**/*.nupkg'
 
       - name: Publish to NuGet.org
-        if: github.ref == 'refs/heads/master' || github.ref == 'refs/heads/dev'
+        if: github.ref == 'refs/heads/master'
         run: dotnet nuget push "**/bin/Release/**/*.nupkg" --source "https://api.nuget.org/v3/index.json" --api-key ${{ secrets.GITHUB_TOKEN }} --skip-duplicate
