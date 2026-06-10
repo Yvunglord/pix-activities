@@ -37,7 +37,3 @@ jobs:
         with: 
           name: PIX.Custom.Activities
           path: '**/bin/Release/**/*.nupkg'
-
-      - name: Publish to NuGet.org
-        if: github.ref == 'refs/heads/master'
-        run: dotnet nuget push "**/bin/Release/**/*.nupkg" --source "https://api.nuget.org/v3/index.json" --api-key ${{ secrets.GITHUB_TOKEN }} --skip-duplicate
