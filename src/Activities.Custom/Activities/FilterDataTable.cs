@@ -15,10 +15,11 @@ public enum FilterAction
 public enum FilterOperator
 {
     Equals,
-    NotEquals 
+    NotEquals
 }
 
 [ScreenName("Отфильтровать таблицу")]
+[Representation("[Table] -> [ResultTable]")]
 [BR.Core.Attributes.Path("Custom activities")]
 public class FilterDataTable : Activity
 {
@@ -44,109 +45,186 @@ public class FilterDataTable : Activity
     public List<string> ColumnsList { get; set; } = new();
 
     [Category("Выходные данные")]
-    [DisplayName("Результат")]
+    [DisplayName("Результирующая таблица")]
+    [IsOut]
     public DataTable ResultTable { get; set; } = new();
 
     public override void Execute(int? optionID)
     {
         ArgumentNullException.ThrowIfNull(Table);
 
-        var processedTable = Table.Copy();
+        ValidateConfiguration();
 
-        if (RowConditions != null && RowConditions.Any())
+        var result = Table.Copy();
+
+        if (RowConditions.Count > 0)
         {
-            processedTable = ProcessRowsFilter(processedTable);
+            result = ProcessRowsFilter(result);
         }
 
-        if (ColumnsList != null && ColumnsList.Any())
+        if (ColumnsList.Count > 0)
         {
-            processedTable = ProcessColumnsFilter(processedTable);
+            result = ProcessColumnsFilter(result);
+        }
+
+        ResultTable = result;
+    }
+
+    private void ValidateConfiguration()
+    {
+        foreach (var condition in RowConditions)
+        {
+            if (string.IsNullOrWhiteSpace(condition.ColumnName))
+            {
+                throw new ArgumentException(
+                    "Для одного из условий фильтрации не указано имя столбца.");
+            }
+
+            if (!Table.Columns.Contains(condition.ColumnName))
+            {
+                throw new ArgumentException(
+                    $"Таблица не содержит столбец '{condition.ColumnName}'.");
+            }
+        }
+
+        foreach (var columnName in ColumnsList)
+        {
+            if (string.IsNullOrWhiteSpace(columnName))
+            {
+                throw new ArgumentException(
+                    "Список столбцов содержит пустое имя.");
+            }
+
+            if (!Table.Columns.Contains(columnName))
+            {
+                throw new ArgumentException(
+                    $"Таблица не содержит столбец '{columnName}'.");
+            }
         }
     }
 
     private DataTable ProcessRowsFilter(DataTable table)
     {
-        var filteredRows = table.AsEnumerable().Where(row =>
+        var rows = table.AsEnumerable()
+            .Where(ShouldKeepRow)
+            .ToList();
+
+        if (rows.Count == 0)
         {
-            bool isMatchAll = true;
-
-            foreach (var cond in RowConditions)
-            {
-                if (!table.Columns.Contains(cond.ColumnName))
-                    continue;
-
-                var cellValue = row[cond.ColumnName];
-
-                if (!EvaluateRowCondition(cellValue, cond.Operator, cond.Value))
-                {
-                    isMatchAll = false; 
-                    break;
-                }
-            }
-
-            return RowAction == FilterAction.Keep ? isMatchAll : !isMatchAll;
-        });
-
-        if (filteredRows.Any())
-        {
-            return filteredRows.CopyToDataTable();
+            return table.Clone();
         }
-        else
-        {
-            DataTable emptyTable = table.Clone();
-            return emptyTable;
-        }
+
+        return rows.CopyToDataTable();
     }
 
-    private bool EvaluateRowCondition(object cellValue, FilterOperator op, object targetValue)
+    private bool ShouldKeepRow(DataRow row)
     {
-        if (cellValue == DBNull.Value || cellValue == null)
-            return targetValue == null || targetValue.ToString() == "";
+        bool matches = EvaluateRow(row);
 
-        string sCell = cellValue.ToString()!;
-        string sTarget = targetValue.ToString() ?? "";
+        return RowAction switch
+        {
+            FilterAction.Keep => matches,
+            FilterAction.Remove => !matches,
+            _ => throw new ArgumentOutOfRangeException(nameof(RowAction))
+        };
+    }
 
-        bool isNumericCell = double.TryParse(sCell, out var dcell);
-        bool isNumericTarget = double.TryParse(sTarget, out var dtarget);
-        bool canCompareNumeric = isNumericCell || isNumericTarget;
+    private bool EvaluateRow(DataRow row)
+    {
+        foreach (var condition in RowConditions)
+        {
+            var cellValue = row[condition.ColumnName];
 
+            if (!EvaluateCondition(cellValue, condition))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private bool EvaluateCondition(
+        object cellValue,
+        FilterRowCondition condition)
+    {
+        return EvaluateOperator(
+            NormalizeValue(cellValue),
+            condition.Operator,
+            NormalizeValue(condition.Value));
+    }
+
+    private bool EvaluateOperator(
+        object? actualValue,
+        FilterOperator op,
+        object? expectedValue)
+    {
         switch (op)
         {
             case FilterOperator.Equals:
-                return sCell.Equals(sTarget, StringComparison.OrdinalIgnoreCase);
+                return AreEqual(actualValue, expectedValue);
 
             case FilterOperator.NotEquals:
-                return !sCell.Equals(sTarget, StringComparison.OrdinalIgnoreCase);
-
-            //TODO: add more cases
+                return !AreEqual(actualValue, expectedValue);
 
             default:
-                return false;
+                throw new NotSupportedException(
+                    $"Оператор '{op}' не поддерживается.");
         }
+    }
+
+    private static object? NormalizeValue(object? value)
+    {
+        if (value == DBNull.Value)
+        {
+            return null;
+        }
+
+        return value;
+    }
+
+    private static bool AreEqual(
+        object? actualValue,
+        object? expectedValue)
+    {
+        if (actualValue == null && expectedValue == null)
+        {
+            return true;
+        }
+
+        if (actualValue == null || expectedValue == null)
+        {
+            return false;
+        }
+
+        return string.Equals(
+            actualValue.ToString(),
+            expectedValue.ToString(),
+            StringComparison.OrdinalIgnoreCase);
     }
 
     private DataTable ProcessColumnsFilter(DataTable table)
     {
-        List<DataColumn> columnsToModify = new List<DataColumn>();
-
-        foreach (DataColumn column in table.Columns)
-        {
-            bool isListed = ColumnsList.Contains(column.ColumnName, StringComparer.OrdinalIgnoreCase);
-
-            if (ColumnAction == FilterAction.Keep && !isListed)
+        var columnsToRemove = table.Columns
+            .Cast<DataColumn>()
+            .Where(column =>
             {
-                columnsToModify.Add(column);
-            }
+                bool isListed = ColumnsList.Contains(
+                    column.ColumnName,
+                    StringComparer.OrdinalIgnoreCase);
 
-            else if (ColumnAction == FilterAction.Remove && isListed)
-            {
-                columnsToModify.Add(column);
-            }
-        }
+                return ColumnAction switch
+                {
+                    FilterAction.Keep => !isListed,
+                    FilterAction.Remove => isListed,
+                    _ => throw new ArgumentOutOfRangeException(nameof(ColumnAction))
+                };
+            })
+            .ToList();
 
-        foreach (var col in columnsToModify)
+        foreach (var column in columnsToRemove)
         {
-            table.Columns.Remove(col);
+            table.Columns.Remove(column);
         }
 
         return table;

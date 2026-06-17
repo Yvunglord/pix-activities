@@ -7,7 +7,7 @@ using Activities.Custom;
 
 namespace Activities.Custom.Tests;
 
-public class JoinDataTablesEvilTests
+public class JoinDataTablesTests
 {
     /// <summary>
     /// Тест проверяет декартово произведение (многие-ко-многим) для дублирующихся ключей,

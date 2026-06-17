@@ -12,5 +12,5 @@ public class FilterRowCondition
     public FilterOperator Operator { get; set; } = FilterOperator.Equals;
 
     [DisplayName("Значение")]
-    public object Value { get; set; } = new();
+    public object? Value { get; set; }
 }
