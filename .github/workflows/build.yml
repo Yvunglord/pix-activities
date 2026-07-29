@@ -34,7 +34,7 @@ jobs:
         run: dotnet build src/Activities.Custom.sln --configuration Release --no-restore
 
       - name: Run Tests
-        run: dotnet test src/Activities.Custom.sln --configuration Release --no-build --verbosity normal
+        run: dotnet test src/Activities.Custom.sln --framework net8.0 --configuration Release --no-build --verbosity normal
 
       - name: Determine Package Version
         id: get_version
