@@ -3,6 +3,8 @@ name: Build and Package PIX Activity
 on:
   push:
     branches: [ "master", "dev" ]
+    tags:
+      - 'v*'
   pull_request:
     branches: [ "master" ]
 
@@ -17,11 +19,13 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: '7.0.x'
+          dotnet-version: '8.0.x'
 
       - name: Restore dependencies
         run: dotnet restore src/Activities.Custom.sln
@@ -32,8 +36,23 @@ jobs:
       - name: Run Tests
         run: dotnet test src/Activities.Custom.sln --configuration Release --no-build --verbosity normal
 
+      - name: Determine Package Version
+        id: get_version
+        shell: bash
+        run: |
+          if [[ $GITHUB_REF == refs/tags/v* ]]; then
+            VERSION=${GITHUB_REF_NAME#v}
+          else
+            VERSION="1.0.${{ github.run_number }}"
+          fi
+          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+          echo "Планируемая версия пакета: $VERSION"
+
+      - name: Pack NuGet package
+        run: dotnet pack src/Activities.Custom.sln --configuration Release --no-build --output ./nupkgs -p:Version=${{ steps.get_version.outputs.VERSION }}
+
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with: 
-          name: PIX.Custom.Activities
-          path: '**/bin/Release/**/*.nupkg'
+          name: PIX.Custom.Activities.${{ steps.get_version.outputs.VERSION }}
+          path: './nupkgs/*.nupkg'
