@@ -106,7 +106,7 @@ public class JoinDataTables : Activity
         // Полностью очищаем данные, старые связи и ограничения
         target.Constraints.Clear();
         target.Rows.Clear();
-        target.Columns.Clear(); // <-- Гарантированно удаляет ВСЕ колонки
+        target.Columns.Clear();
 
         // Строим новую схему на основе результатов объединения
         foreach (DataColumn column in source.Columns)
@@ -114,10 +114,17 @@ public class JoinDataTables : Activity
             target.Columns.Add(column.ColumnName, column.DataType);
         }
 
-        // Импортируем строки
-        foreach (DataRow row in source.Rows)
+        target.BeginLoadData();
+        try
         {
-            target.ImportRow(row);
+            foreach (DataRow row in source.Rows)
+            {
+                target.Rows.Add(row.ItemArray);
+            }
+        }
+        finally
+        {
+            target.EndLoadData();
         }
     }
 
@@ -130,7 +137,7 @@ public class JoinDataTables : Activity
     {
         ValidateKeys(left, right, leftKeys, rightKeys);
 
-        var result = CreateResultStructure(left, right, leftKeys, rightKeys);
+        var result = CreateResultStructure(left, right);
 
         // Функция сборки композитного ключа для Левой таблицы
         CompositeKey BuildLeftKey(DataRow row)
@@ -172,25 +179,8 @@ public class JoinDataTables : Activity
             // Заполняем данные из правой таблицы
             if (rightRow != null)
             {
-                // Если левой строки нет (например, при Right/Full Join), 
-                // нам нужно перенести значения ключей из правой таблицы в соответствующие колонки результирующей таблицы
-                if (leftRow == null)
-                {
-                    for (int i = 0; i < rightKeys.Count; i++)
-                    {
-                        string targetLeftKeyName = leftKeys[i];
-                        newRow[targetLeftKeyName] = rightRow[rightKeys[i]];
-                    }
-                }
-
                 foreach (DataColumn column in right.Columns)
                 {
-                    // Ключевую колонку правой таблицы пропускаем, так как её роль уже выполняет левая ключевая колонка
-                    if (rightKeys.Contains(column.ColumnName))
-                    {
-                        continue;
-                    }
-
                     string targetColumn;
                     // Если имя колонки совпадает с колонкой из левой таблицы, добавляем суффикс
                     if (left.Columns.Contains(column.ColumnName))
@@ -201,7 +191,7 @@ public class JoinDataTables : Activity
                     {
                         targetColumn = column.ColumnName;
                     }
-
+                    
                     newRow[targetColumn] = rightRow[column];
                 }
             }
@@ -348,9 +338,8 @@ public class JoinDataTables : Activity
 
     private static DataTable CreateResultStructure(
         DataTable left,
-        DataTable right,
-        List<string> leftKeys,
-        List<string> rightKeys)
+        DataTable right
+        )
     {
         var result = new DataTable();
 
@@ -364,13 +353,6 @@ public class JoinDataTables : Activity
         foreach (DataColumn column in right.Columns)
         {
             string name = column.ColumnName;
-
-            // Если колонка является правым ключом соединения, пропускаем её 
-            // (в результирующей таблице за неё отвечает колонка левого ключа)
-            if (rightKeys.Contains(name))
-            {
-                continue;
-            }
 
             // Коллизия имён: если колонка с таким же именем уже есть из левой таблицы, добавляем суффикс
             if (result.Columns.Contains(name))
